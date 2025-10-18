@@ -135,13 +135,23 @@ public class VipCore : BasePlugin
         if (player.IsBot || !IsClientVip[player.Slot])
             return HookResult.Continue;
 
+        var playerSlot = player.Slot;
+
         AddTimer(Config.Delay, () =>
         {
-            if (player.Connected != PlayerConnectedState.PlayerConnected) return;
+            var delayedPlayer = Utilities.GetPlayerFromSlot(playerSlot);
+            if (delayedPlayer is null || !delayedPlayer.IsValid || delayedPlayer.Handle == IntPtr.Zero ||
+                delayedPlayer.UserId == null)
+                return;
+
+            if (delayedPlayer.IsBot || !IsClientVip[delayedPlayer.Slot])
+                return;
+
+            if (delayedPlayer.Connected != PlayerConnectedState.PlayerConnected) return;
 
             try
             {
-                VipApi.PlayerSpawn(player);
+                VipApi.PlayerSpawn(delayedPlayer);
             }
             catch (Exception ex)
             {
