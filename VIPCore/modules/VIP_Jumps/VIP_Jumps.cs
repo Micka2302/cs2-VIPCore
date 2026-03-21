@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Utils;
@@ -10,7 +10,7 @@ public class VipJumps : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius,GSM-RO";
     public override string ModuleName => "[VIP] Jumps";
-    public override string ModuleVersion => "v1.0.2";
+    public override string ModuleVersion => "v1.3.4";
 
     private IVipCoreApi? _api;
     private Jumps? _jumps;

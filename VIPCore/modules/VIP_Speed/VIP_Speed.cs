@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Capabilities;
@@ -10,7 +10,7 @@ public class VipSpeed : BasePlugin
 {
     public override string ModuleAuthor => "panda";
     public override string ModuleName => "[VIP] Speed";
-    public override string ModuleVersion => "v1.1";
+    public override string ModuleVersion => "v1.3.4";
     private IVipCoreApi? _api;
     private SpeedModifier? _speedModifier;
     private PluginCapability<IVipCoreApi> PluginCapability { get; } = new("vipcore:core");

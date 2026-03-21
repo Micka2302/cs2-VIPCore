@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Menu;
@@ -11,7 +11,7 @@ public class VipFov : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Fov";
-    public override string ModuleVersion => "v1.0.1";
+    public override string ModuleVersion => "v1.3.4";
     
     private IVipCoreApi? _api;
     private Fov _fov;

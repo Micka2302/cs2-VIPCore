@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using VipCoreApi;
 using Microsoft.Extensions.Logging;
@@ -9,7 +9,7 @@ public class VipInfiniteAmmo : BasePlugin
 {
 	public override string ModuleAuthor => "panda";
 	public override string ModuleName => "[VIP] Infinite Ammo";
-	public override string ModuleVersion => "v1.1";
+	public override string ModuleVersion => "v1.3.4";
 
 	private IVipCoreApi? _api;
 	private InfiniteAmmo? _infiniteAmmoFeature;

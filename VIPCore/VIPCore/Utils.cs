@@ -6,44 +6,48 @@ namespace VIPCore;
 
 public static class Utils
 {
+    private const long SteamId64IdentifierOffset = 76561197960265728;
+
     public static bool IsValidEntity(CEntityInstance ent)
     {
         return ent.IsValid;
     }
 
-    public static int GetAccountIdFromCommand(string steamId, out CCSPlayerController? player)
+    public static long GetAccountIdFromCommand(string steamId, out CCSPlayerController? player)
     {
         player = null;
+        steamId = steamId.Trim();
 
-        if (steamId.Contains("STEAM_1"))
+        if (steamId.StartsWith("STEAM_1", StringComparison.Ordinal))
         {
             steamId = ReplaceFirstCharacter(steamId);
         }
 
-        if (steamId.Contains("STEAM_") || steamId.Contains("765611"))
+        if (steamId.Contains("STEAM_", StringComparison.OrdinalIgnoreCase) ||
+            steamId.StartsWith("765611", StringComparison.Ordinal))
         {
             player = GetPlayerFromSteamId(steamId);
 
-            if (steamId.StartsWith("765611"))
+            if (TryParseSteamId64(steamId, out var steamId64))
             {
-                var accId = new SteamID(ulong.Parse(steamId)).AccountId;
-
-                if (player == null) return accId;
-                var authorizedSteamId = player.AuthorizedSteamID;
-
-                return authorizedSteamId == null ? accId : authorizedSteamId.AccountId;
+                if (player?.AuthorizedSteamID != null)
+                    return (long)player.AuthorizedSteamID.SteamId64;
+                return steamId64;
             }
-            else
-            {
-                var accId = new SteamID(steamId).AccountId;
-                if (player == null) return accId;
 
-                var authorizedSteamId = player.AuthorizedSteamID;
-                return authorizedSteamId == null ? accId : authorizedSteamId.AccountId;
-            }
+            return -1;
         }
 
-        return int.Parse(steamId);
+        if (!long.TryParse(steamId, out var numericSteamId) || numericSteamId <= 0)
+            return -1;
+
+        player = GetPlayerFromSteamId(steamId);
+        if (player?.AuthorizedSteamID != null)
+            return (long)player.AuthorizedSteamID.SteamId64;
+
+        return numericSteamId >= SteamId64IdentifierOffset
+            ? numericSteamId
+            : numericSteamId + SteamId64IdentifierOffset;
     }
 
     public static CCSPlayerController? GetPlayerFromSteamId(string steamId)
@@ -55,9 +59,32 @@ public static class Utils
             u.AuthorizedSteamID.AccountId.ToString().Equals(steamId)));
     }
 
+    private static bool TryParseSteamId64(string steamId, out long steamId64)
+    {
+        steamId64 = -1;
+
+        try
+        {
+            if (ulong.TryParse(steamId, out var numericSteamId))
+            {
+                steamId64 = numericSteamId >= (ulong)SteamId64IdentifierOffset
+                    ? (long)numericSteamId
+                    : (long)(numericSteamId + (ulong)SteamId64IdentifierOffset);
+                return true;
+            }
+
+            steamId64 = (long)new SteamID(steamId).SteamId64;
+            return steamId64 > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static string ReplaceFirstCharacter(string input)
     {
-        if (input.Length <= 0) return input;
+        if (input.Length <= 6) return input;
 
         var charArray = input.ToCharArray();
         charArray[6] = '0';

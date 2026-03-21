@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using VipCoreApi;
@@ -9,7 +9,7 @@ public class VipKillScreen : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Kill Screen";
-    public override string ModuleVersion => "v1.0.1";
+    public override string ModuleVersion => "v1.3.4";
 
     private KillScreen _killScreen;
     private IVipCoreApi? _api;

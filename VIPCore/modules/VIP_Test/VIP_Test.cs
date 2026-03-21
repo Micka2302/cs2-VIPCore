@@ -1,11 +1,11 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Entities;
-using Dapper;
+using Microsoft.Extensions.Logging;
 using MySqlConnector;
 using VipCoreApi;
 
@@ -15,20 +15,30 @@ public class VipTest : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Test";
-    public override string ModuleVersion => "v1.0.0";
+    public override string ModuleVersion => "v1.3.4";
 
-    private static readonly string Feature = "vip_test_count";
+    private const string VipTestCountFeature = "vip_test_count";
+    private const string VipTestCooldownFeature = "vip_test_cooldown_until";
+    private const string LegacyVipTestTable = "vipcore_test";
     private IVipCoreApi? _api;
+    private IVipCoreApi Api => _api ?? throw new InvalidOperationException("VIPCore API is not initialized.");
     private Config _config = null!;
-    
+    private int _coreTimeMode;
+    private readonly JsonSerializerOptions _jsonSerializerOptions = new()
+    {
+        ReadCommentHandling = JsonCommentHandling.Skip
+    };
+
     private PluginCapability<IVipCoreApi> PluginCapability { get; } = new("vipcore:core");
 
     public override void OnAllPluginsLoaded(bool hotReload)
     {
         _api = PluginCapability.Get();
         if (_api == null) return;
+
         _config = LoadConfig();
-        Task.Run(CreateVipTestTable);
+        _coreTimeMode = LoadCoreTimeMode();
+        Task.Run(DropLegacyVipTestTableAsync);
     }
 
     [ConsoleCommand("css_viptest")]
@@ -38,9 +48,9 @@ public class VipTest : BasePlugin
 
         if (!_config.VipTestEnabled) return;
 
-        if (_api.IsClientVip(controller))
+        if (Api.IsClientVip(controller))
         {
-            _api.PrintToChat(controller, _api.GetTranslatedText("vip.AlreadyVipPrivileges"));
+            Api.PrintToChat(controller, Api.GetTranslatedText("vip.AlreadyVipPrivileges"));
             return;
         }
 
@@ -48,19 +58,22 @@ public class VipTest : BasePlugin
 
         if (authorizedSteamId == null) return;
 
-        Task.Run(() => GivePlayerVipTest(controller, authorizedSteamId, _config));
+        Task.Run(() => GivePlayerVipTestAsync(controller, authorizedSteamId.SteamId64, _config));
     }
 
-    private async void GivePlayerVipTest(CCSPlayerController player, SteamID steamId, Config vipTest)
+    private Task GivePlayerVipTestAsync(CCSPlayerController player, ulong steamId64, Config vipTest)
     {
-        var vipTestEndTime = await GetEndTime(steamId.SteamId2);
-        var vipTestCount = _api.GetPlayerCookie<int>(steamId.SteamId64, Feature);
-        
+        if (!player.IsValid)
+            return Task.CompletedTask;
+
+        var vipTestEndTime = Api.GetPlayerCookie<long>(steamId64, VipTestCooldownFeature);
+        var vipTestCount = Api.GetPlayerCookie<int>(steamId64, VipTestCountFeature);
+
         if (vipTestCount >= vipTest.VipTestCount)
         {
             Server.NextFrame(() =>
-                _api.PrintToChat(player, _api.GetTranslatedText("viptest.YouCanNoLongerTakeTheVip")));
-            return;
+                Api.PrintToChat(player, Api.GetTranslatedText("viptest.YouCanNoLongerTakeTheVip")));
+            return Task.CompletedTask;
         }
 
         if (vipTestEndTime > DateTimeOffset.UtcNow.ToUnixTimeSeconds())
@@ -70,150 +83,93 @@ public class VipTest : BasePlugin
                 $"{(time.Days == 0 ? "" : $"{time.Days}d")} {time.Hours:D2}:{time.Minutes:D2}:{time.Seconds:D2}";
 
             Server.NextFrame(() =>
-                _api.PrintToChat(player, _api.GetTranslatedText("viptest.RetakenThrough", timeRemainingFormatted)));
-            return;
+                Api.PrintToChat(player, Api.GetTranslatedText("viptest.RetakenThrough", timeRemainingFormatted)));
+            return Task.CompletedTask;
         }
 
-        var coolDownTime = DateTimeOffset.UtcNow.AddSeconds(vipTest.VipTestCooldown).ToUnixTimeSeconds();
-        var endTime = DateTimeOffset.UtcNow.AddSeconds(vipTest.VipTestDuration).ToUnixTimeSeconds();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var coolDownTime = now + vipTest.VipTestCooldown;
+        var durationInSeconds = GetDurationInSeconds(vipTest.VipTestDuration);
 
-        await AddUserOrUpdateVipTestAsync(steamId.SteamId2, (int)coolDownTime);
-        _api.SetPlayerCookie(steamId.SteamId64, Feature, vipTestCount + 1);
+        Api.SetPlayerCookie(steamId64, VipTestCooldownFeature, coolDownTime);
+        Api.SetPlayerCookie(steamId64, VipTestCountFeature, vipTestCount + 1);
 
-        var timeRemaining = DateTimeOffset.FromUnixTimeSeconds(endTime) - DateTimeOffset.UtcNow;
+        var timeRemaining = TimeSpan.FromSeconds(durationInSeconds);
+        var durationText = vipTest.VipTestDuration == 0
+            ? "Permanent"
+            : timeRemaining.ToString(timeRemaining.Hours > 0 ? @"h\:mm\:ss" : @"m\:ss");
 
         Server.NextFrame(() =>
         {
-            _api.PrintToChat(player,
-                _api.GetTranslatedText("viptest.SuccessfullyPassed",
-                    timeRemaining.ToString(timeRemaining.Hours > 0 ? @"h\:mm\:ss" : @"m\:ss")));
-            _api.GiveClientVip(player, vipTest.VipTestGroup, vipTest.VipTestDuration);
+            if (!player.IsValid) return;
+
+            Api.PrintToChat(player,
+                Api.GetTranslatedText("viptest.SuccessfullyPassed", durationText));
+            Api.GiveClientVip(player, vipTest.VipTestGroup, vipTest.VipTestDuration);
         });
+
+        return Task.CompletedTask;
     }
 
-    private async Task AddUserOrUpdateVipTestAsync(string steamId, int endTime)
+    private long GetDurationInSeconds(int duration)
     {
-        if (await IsUserInVipTest(steamId))
+        if (duration <= 0)
+            return 0;
+
+        return _coreTimeMode switch
         {
-            await UpdateUserVipTestCount(steamId, endTime);
-            return;
-        }
-
-        await AddUserToVipTest(steamId, endTime);
+            1 => duration * 60L,
+            2 => duration * 3600L,
+            3 => duration * 86400L,
+            _ => duration
+        };
     }
 
-    private async Task AddUserToVipTest(string steamId, long endTime)
+    private int LoadCoreTimeMode()
     {
+        var coreConfigPath = Path.Combine(Api.CoreConfigDirectory, "vip_core.json");
+        if (!File.Exists(coreConfigPath))
+            return 0;
+
         try
         {
-            await using var dbConnection = new MySqlConnection(_api.GetDatabaseConnectionString);
-            dbConnection.Open();
+            var config = JsonSerializer.Deserialize<CoreConfigSnapshot>(File.ReadAllText(coreConfigPath),
+                _jsonSerializerOptions);
+            if (config == null)
+                return 0;
 
-            var insertUserQuery = @"
-            INSERT INTO `vipcore_test` (`steamid`, `end_time`)
-            VALUES (@SteamId, @EndTime);";
-
-            await dbConnection.ExecuteAsync(insertUserQuery,
-                new { SteamId = steamId, EndTime = endTime });
+            return config.TimeMode is >= 0 and <= 3 ? config.TimeMode : 0;
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
-        }
-    }
-
-    private async Task UpdateUserVipTestCount(string steamId, long endTime)
-    {
-        try
-        {
-            await using var dbConnection = new MySqlConnection(_api.GetDatabaseConnectionString);
-            dbConnection.Open();
-
-            var updateCountQuery = @"
-            UPDATE `vipcore_test`
-            SET `end_time` = @EndTime
-            WHERE `steamid` = @SteamId;";
-
-            await dbConnection.ExecuteAsync(updateCountQuery,
-                new { SteamId = steamId, EndTime = endTime });
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine(e);
-        }
-    }
-
-    private async Task<long> GetEndTime(string steamId)
-    {
-        try
-        {
-            await using var dbConnection = new MySqlConnection(_api.GetDatabaseConnectionString);
-            dbConnection.Open();
-    
-            var result = await dbConnection.QuerySingleOrDefaultAsync<long>(@"
-            SELECT `end_time` FROM `vipcore_test` WHERE `steamid` = @SteamId;",
-                new { SteamId = steamId });
-    
-            return result;
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine(e);
+            Logger.LogWarning(e, "Failed to read vip_core.json for TimeMode, fallback to seconds.");
             return 0;
         }
     }
 
-    private async Task<bool> IsUserInVipTest(string steamId)
+    private async Task DropLegacyVipTestTableAsync()
     {
         try
         {
-            await using var dbConnection = new MySqlConnection(_api.GetDatabaseConnectionString);
-            dbConnection.Open();
-
-            var checkUserQuery = @"
-            SELECT COUNT(*)
-            FROM `vipcore_test`
-            WHERE `steamid` = @SteamId;";
-
-            var count = dbConnection.ExecuteScalarAsync<int>(checkUserQuery, new { SteamId = steamId }).Result;
-
-            return count > 0;
+            await using var dbConnection = new MySqlConnection(Api.GetDatabaseConnectionString);
+            await dbConnection.OpenAsync();
+            await using var command = dbConnection.CreateCommand();
+            command.CommandText = $"DROP TABLE IF EXISTS `{LegacyVipTestTable}`;";
+            await command.ExecuteNonQueryAsync();
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
-            return false;
-        }
-    }
-
-    private async Task CreateVipTestTable()
-    {
-        try
-        {
-            await using var dbConnection = new MySqlConnection(_api.GetDatabaseConnectionString);
-            dbConnection.Open();
-
-            var createKeysTable = @"
-            CREATE TABLE IF NOT EXISTS `vipcore_test` (
-                `steamid` VARCHAR(255) NOT NULL PRIMARY KEY,
-                `end_time` BIGINT NOT NULL
-            );";
-
-            await dbConnection.ExecuteAsync(createKeysTable);
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine(e);
+            Logger.LogWarning(e, "Failed to drop legacy table {table}.", LegacyVipTestTable);
         }
     }
 
     private Config LoadConfig()
     {
-        var configPath = Path.Combine(_api.ModulesConfigDirectory, "vip_test.json");
+        var configPath = Path.Combine(Api.ModulesConfigDirectory, "vip_test.json");
 
         if (!File.Exists(configPath)) return CreateConfig(configPath);
 
-        var config = JsonSerializer.Deserialize<Config>(File.ReadAllText(configPath))!;
+        var config = JsonSerializer.Deserialize<Config>(File.ReadAllText(configPath), _jsonSerializerOptions)!;
 
         return config;
     }
@@ -230,9 +186,17 @@ public class VipTest : BasePlugin
         };
 
         File.WriteAllText(configPath,
-            JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
+            JsonSerializer.Serialize(config, new JsonSerializerOptions
+            {
+                WriteIndented = true
+            }));
 
         return config;
+    }
+
+    private sealed class CoreConfigSnapshot
+    {
+        public int TimeMode { get; init; }
     }
 }
 

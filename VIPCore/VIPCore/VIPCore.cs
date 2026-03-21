@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
@@ -19,7 +19,7 @@ public class VipCore : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Core";
-    public override string ModuleVersion => "v1.3.3";
+    public override string ModuleVersion => "v1.3.4";
 
     public Config Config { get; set; } = null!;
     public CoreConfig CoreConfig { get; set; } = null!;
@@ -105,23 +105,25 @@ public class VipCore : BasePlugin
         if (player == null || !IsClientVip[player.Slot])
             return HookResult.Continue;
 
+        var steamId64 = GetPlayerSteamId64(player);
+
         IsClientVip[player.Slot] = false;
-        if (Users.TryGetValue(player.SteamID, out var user))
+        if (Users.TryGetValue(steamId64, out var user))
         {
             foreach (var featureState in user.FeatureState.Where(f =>
                          Features[f.Key].FeatureType is FeatureType.Toggle))
             {
-                VipApi.SetPlayerCookie(player.SteamID, featureState.Key, (int)featureState.Value);
+                VipApi.SetPlayerCookie(steamId64, featureState.Key, (int)featureState.Value);
             }
         }
 
-        Users.Remove(player.SteamID, out var _);
+        Users.Remove(steamId64, out var _);
 
         var authAccId = player.AuthorizedSteamID;
         if (authAccId == null) return HookResult.Continue;
 
         var playerName = player.PlayerName;
-        Task.Run(() => Database.UpdateUserVip(authAccId.AccountId, name: playerName));
+        Task.Run(() => Database.UpdateUserVip((long)authAccId.SteamId64, name: playerName));
 
         return HookResult.Continue;
     }
@@ -183,29 +185,52 @@ public class VipCore : BasePlugin
     {
         try
         {
-            var userFromDb = await Database.GetUserFromDb(steamId.AccountId);
-            if (userFromDb == null) return;
+            var steamId64 = steamId.SteamId64;
+            var accountId = (long)steamId64;
 
-            Users.Remove(steamId.SteamId64, out _);
-            foreach (var user in userFromDb.OfType<User>().Where(user => user.sid == CoreConfig.ServerId))
+            // Refresh in-memory state and permissions at each connection.
+            if (Users.TryRemove(steamId64, out var cachedUser))
             {
-                Users.TryAdd(steamId.SteamId64, user);
-                SetClientFeature(steamId.SteamId64, user.group);
+                VipApi.OnPlayerRemoved(player, cachedUser.group);
+            }
 
-                var timeRemaining = DateTimeOffset.FromUnixTimeSeconds(user.expires);
+            IsClientVip[player.Slot] = false;
 
-                await Server.NextFrameAsync(() =>
-                {
-                    VipApi.OnPlayerLoaded(player, user.group);
-                    IsClientVip[player.Slot] = IsUserActiveVip(player);
+            var user = await Database.GetExistingUserFromDb(accountId);
+            if (user == null)
+                return;
 
-                    AddTimer(5.0f, () => PrintToChat(player,
-                        Localizer["vip.WelcomeToTheServer", user.name] + (user.expires == 0
-                            ? string.Empty
-                            : Localizer["vip.Expires", user.group, timeRemaining.ToString("G")])));
-                });
+            var now = DateTime.UtcNow.GetUnixEpoch();
+            if (user.expires != 0 && now >= user.expires)
+            {
+                await Database.RemoveUserFromDb(accountId);
+                await Server.NextFrameAsync(() => VipApi.OnPlayerRemoved(player, user.group));
                 return;
             }
+
+            Users[steamId64] = user;
+            SetClientFeature(steamId64, user.group);
+
+            var expirationText = user.expires == 0
+                ? string.Empty
+                : Localizer["vip.Expires", user.group, DateTimeOffset.FromUnixTimeSeconds(user.expires).ToString("G")];
+
+            await Server.NextFrameAsync(() =>
+            {
+                if (!player.IsValid || player.Connected != PlayerConnectedState.PlayerConnected)
+                    return;
+
+                VipApi.OnPlayerLoaded(player, user.group);
+                IsClientVip[player.Slot] = true;
+
+                AddTimer(5.0f, () =>
+                {
+                    if (!player.IsValid || player.Connected != PlayerConnectedState.PlayerConnected)
+                        return;
+
+                    PrintToChat(player, Localizer["vip.WelcomeToTheServer", user.name] + expirationText);
+                });
+            });
         }
         catch (Exception e)
         {
@@ -232,7 +257,7 @@ public class VipCore : BasePlugin
         }
     }
 
-    public User CreateNewUser(int accountId, string username, string group, int endTime)
+    public User CreateNewUser(long accountId, string username, string group, int endTime)
     {
         return new User
         {
@@ -281,10 +306,11 @@ public class VipCore : BasePlugin
 
         if (player == null) return;
 
-        Users.TryAdd(player.SteamID, user);
+        var steamId64 = GetPlayerSteamId64(player);
+        Users.TryAdd(steamId64, user);
         IsClientVip[player.Slot] = true;
 
-        SetClientFeature(player.SteamID, user.group);
+        SetClientFeature(steamId64, user.group);
         VipApi.OnPlayerLoaded(player, user.group);
     }
 
@@ -305,13 +331,17 @@ public class VipCore : BasePlugin
         RemoveVip(player, accountId);
     }
 
-    public void RemoveVip(CCSPlayerController? player, int accountId) // :)
+    public void RemoveVip(CCSPlayerController? player, long accountId) // :)
     {
         if (player != null)
         {
-            VipApi.OnPlayerRemoved(player, Users[player.SteamID].group);
+            var steamId64 = GetPlayerSteamId64(player);
+            if (Users.TryGetValue(steamId64, out var user))
+            {
+                VipApi.OnPlayerRemoved(player, user.group);
+            }
 
-            Users.TryRemove(player.SteamID, out _);
+            Users.TryRemove(steamId64, out _);
             IsClientVip[player.Slot] = false;
         }
 
@@ -350,7 +380,8 @@ public class VipCore : BasePlugin
 
         if (player != null)
         {
-            if (!Users.TryGetValue(player.SteamID, out var user)) return;
+            var steamId64 = GetPlayerSteamId64(player);
+            if (!Users.TryGetValue(steamId64, out var user)) return;
 
             user.group = vipGroup;
         }
@@ -394,7 +425,8 @@ public class VipCore : BasePlugin
             return;
         }
 
-        if (!Users.TryGetValue(player.SteamID, out var user)) return;
+        var steamId64 = GetPlayerSteamId64(player);
+        if (!Users.TryGetValue(steamId64, out var user)) return;
 
         var menu = VipApi.CreateMenu(Localizer["menu.Title", user.group]);
         if (Config.Groups.TryGetValue(user.group, out var vipGroup))
@@ -491,6 +523,11 @@ public class VipCore : BasePlugin
         return IsClientVip[player.Slot];
     }
 
+    private static ulong GetPlayerSteamId64(CCSPlayerController player)
+    {
+        return player.AuthorizedSteamID?.SteamId64 ?? player.SteamID;
+    }
+
     private bool IsUserActiveVip(CCSPlayerController player)
     {
         if (!IsCoreEnableConVar.Value || !Utils.IsValidEntity(player) || !player.IsValid || player.IsBot)
@@ -565,7 +602,7 @@ public class VipCore : BasePlugin
         _ => throw new KeyNotFoundException("No such number was found!")
     };
 
-    public int CalculateEndTimeInSeconds(int time) => DateTime.UtcNow.AddSeconds(CoreConfig.TimeMode switch
+    public long CalculateEndTimeInSeconds(int time) => DateTime.UtcNow.AddSeconds(CoreConfig.TimeMode switch
     {
         1 => time * 60,
         2 => time * 3600,
@@ -576,19 +613,20 @@ public class VipCore : BasePlugin
 
 public class User
 {
-    public int account_id { get; set; }
+    public long account_id { get; set; }
     public required string name { get; set; }
-    public int lastvisit { get; set; }
-    public int sid { get; set; }
+    public long lastvisit { get; set; }
+    public long sid { get; set; }
     public required string group { get; set; }
-    public int expires { get; set; }
+    public long expires { get; set; }
+    public DateTime? expiration { get; set; }
     public Dictionary<string, FeatureState> FeatureState { get; set; } = new();
 }
 
 public class PlayerCookie
 {
     public ulong SteamId64 { get; set; }
-    public Dictionary<string, object> Features { get; set; } = new();
+    public ConcurrentDictionary<string, object> Features { get; set; } = new();
 }
 
 public class Feature
@@ -599,11 +637,11 @@ public class Feature
 
 public static class GetUnixTime
 {
-    public static int GetUnixEpoch(this DateTime dateTime)
+    public static long GetUnixEpoch(this DateTime dateTime)
     {
         var unixTime = dateTime.ToUniversalTime() -
                        new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        return (int)unixTime.TotalSeconds;
+        return (long)unixTime.TotalSeconds;
     }
 }

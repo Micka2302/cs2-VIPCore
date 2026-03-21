@@ -21,6 +21,12 @@
 | **`css_vip_deleteuser <steamid or accountid>`** | Allows you to delete a player by SteamID identifier **(for server console only)** |
 | **`css_vip`** or **`!vip`** | Opens the VIP menu |
 
+## Database Notes
+- `vip_users.account_id` now stores **SteamID64**.
+- Legacy entries stored as SteamID32 are automatically migrated to SteamID64 when the core starts.
+- `vip_users.expiration` is now synced as a readable `DATETIME` based on unix timestamp column `expires`.
+- Feature cookies are now stored in database table `vip_features` (shared across servers), with one row per `steamid64` and one column per feature key.
+
 ## Configs
 Located in the folder `addons/counterstrikesharp/configs/plugins/VIPCore`
 

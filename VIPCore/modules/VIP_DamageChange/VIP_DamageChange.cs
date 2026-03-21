@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Modules.Memory;
@@ -12,7 +12,7 @@ public class VipDamageChange : BasePlugin
 {
     public override string ModuleAuthor => "panda.";
     public override string ModuleName => "[VIP] Damage Multiplier";
-    public override string ModuleVersion => "v1.1";
+    public override string ModuleVersion => "v1.3.4";
     private IVipCoreApi? _api;
     private DamageMultiplier? _damageMultiplier;
     private PluginCapability<IVipCoreApi> PluginCapability { get; } = new("vipcore:core");

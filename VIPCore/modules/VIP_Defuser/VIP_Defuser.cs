@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using VipCoreApi;
@@ -9,7 +9,7 @@ public class VipDefuser : BasePlugin
 {
     public override string ModuleAuthor => "panda";
     public override string ModuleName => "[VIP] Defuser";
-    public override string ModuleVersion => "v1.1";
+    public override string ModuleVersion => "v1.3.4";
     
     private Defuser? _defuser;
     private IVipCoreApi? _api;

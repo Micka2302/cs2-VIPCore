@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using VipCoreApi;
 
@@ -7,7 +7,7 @@ public class VipGrenades : BasePlugin
 {
     public override string ModuleAuthor => "panda.";
     public override string ModuleName => "[VIP] Grenades";
-    public override string ModuleVersion => "1.0";
+    public override string ModuleVersion => "v1.3.4";
 
     private Grenades _grenades = null!;
     private IVipCoreApi? _api;

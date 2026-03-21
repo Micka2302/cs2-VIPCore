@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Memory;
@@ -10,7 +10,7 @@ public class VipHealth : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Health";
-    public override string ModuleVersion => "v1.0.2";
+    public override string ModuleVersion => "v1.3.4";
 
     private IVipCoreApi? _api;
     private Health _health;

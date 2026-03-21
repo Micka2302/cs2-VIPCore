@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using VipCoreApi;
@@ -10,7 +10,7 @@ public class VipEndurance : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Endurance";
-    public override string ModuleVersion => "v1.0.1";
+    public override string ModuleVersion => "v1.3.4";
 
     private PluginCapability<IVipCoreApi> PluginCapability { get; } = new("vipcore:core");
     private IVipCoreApi? _api;

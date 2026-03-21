@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Core.Capabilities;
@@ -17,7 +17,7 @@ public class VipFlags : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Flags";
-    public override string ModuleVersion => "v1.0.1";
+    public override string ModuleVersion => "v1.3.4";
 
     private IVipCoreApi? _api;
     private Flags _flags;
