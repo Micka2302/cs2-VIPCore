@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Timers;
@@ -10,7 +10,7 @@ public class VipRegenArmor : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Armor Regeneration";
-    public override string ModuleVersion => "v1.0.0";
+    public override string ModuleVersion => "v1.3.4";
 
     private RegenArmor _regenArmor;
     private IVipCoreApi? _api;

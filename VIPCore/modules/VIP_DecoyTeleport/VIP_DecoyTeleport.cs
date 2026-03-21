@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Utils;
 using VipCoreApi;
@@ -9,7 +9,7 @@ public class VipDecoyTeleport : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Decoy Teleport";
-    public override string ModuleVersion => "v1.0.0";
+    public override string ModuleVersion => "v1.3.4";
 
     private DecoyTeleport _decoyTeleport;
     private IVipCoreApi? _api;

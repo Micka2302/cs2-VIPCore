@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
@@ -12,7 +12,7 @@ public class VipGravity : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Gravity";
-    public override string ModuleVersion => "1.0.1";
+    public override string ModuleVersion => "v1.3.4";
 
     private IVipCoreApi? _api;
     private Gravity _gravity;

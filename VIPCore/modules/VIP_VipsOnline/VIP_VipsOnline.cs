@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using CounterStrikeSharp.API;
@@ -14,7 +14,7 @@ public class VIPVipsOnline : BasePlugin
 {
     public override string ModuleAuthor => "panda";
     public override string ModuleName => "[VIP] Vips Online";
-    public override string ModuleVersion => "v1.0";
+    public override string ModuleVersion => "v1.3.4";
     private IVipCoreApi? _api;
     private PluginCapability<IVipCoreApi> PluginCapability { get; } = new("vipcore:core");
 

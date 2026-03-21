@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Commands;
@@ -12,7 +12,7 @@ public class VipBuyTeamWeapon : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] BuyTeamWeapon";
-    public override string ModuleVersion => "v1.0.0";
+    public override string ModuleVersion => "v1.3.4";
     
     private BuyTeamWeapon _buyTeamWeapon;
     private IVipCoreApi? _api;

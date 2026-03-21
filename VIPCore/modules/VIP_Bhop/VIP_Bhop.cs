@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
@@ -15,7 +15,7 @@ public class VIP_Bhop : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Bhop";
-    public override string ModuleVersion => "v1.0.3";
+    public override string ModuleVersion => "v1.3.4";
 
     private Bhop _bhop;
     private IVipCoreApi? _api;

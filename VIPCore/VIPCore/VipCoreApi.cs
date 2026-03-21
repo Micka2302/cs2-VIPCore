@@ -1,4 +1,6 @@
-﻿using System.Text;
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
@@ -14,7 +16,7 @@ namespace VIPCore;
 public class VipCoreApi : IVipCoreApi
 {
     private readonly VipCore _vipCore;
-    private Dictionary<ulong, PlayerCookie> _playersCookie = [];
+    private ConcurrentDictionary<ulong, PlayerCookie> _playersCookie = new();
 
     public event Action<CCSPlayerController>? OnPlayerSpawn;
     public event Action<CCSPlayerController, string>? PlayerLoaded;
@@ -67,6 +69,11 @@ public class VipCoreApi : IVipCoreApi
         }
 
         _vipCore.PrintLogInfo("Feature '{feature}' registered successfully", vipFeatureBase.Feature);
+
+        if (!string.IsNullOrWhiteSpace(vipFeatureBase.Feature))
+        {
+            Task.Run(() => _vipCore.Database.EnsureFeatureColumnAsync(vipFeatureBase.Feature));
+        }
     }
 
     public void UnRegisterFeature(VipFeatureBase vipFeatureBase)
@@ -97,7 +104,7 @@ public class VipCoreApi : IVipCoreApi
 
     public FeatureState GetPlayerFeatureState(CCSPlayerController player, string feature)
     {
-        if (!_vipCore.Users.TryGetValue(player.SteamID, out var user))
+        if (!_vipCore.Users.TryGetValue(GetPlayerSteamId64(player), out var user))
             throw new InvalidOperationException("player not found");
 
         return user.FeatureState.GetValueOrDefault(feature, FeatureState.NoAccess);
@@ -105,7 +112,7 @@ public class VipCoreApi : IVipCoreApi
 
     public void SetPlayerFeatureState(CCSPlayerController player, string feature, FeatureState newState)
     {
-        if (!_vipCore.Users.TryGetValue(player.SteamID, out var user))
+        if (!_vipCore.Users.TryGetValue(GetPlayerSteamId64(player), out var user))
             throw new InvalidOperationException("player not found");
 
         if (!user.FeatureState.ContainsKey(feature))
@@ -138,7 +145,7 @@ public class VipCoreApi : IVipCoreApi
     {
         if (_vipCore.ForcedDisabledFeatures.Contains(feature)) return false;
 
-        if (!_vipCore.Users.TryGetValue(player.SteamID, out var user)) return false;
+        if (!_vipCore.Users.TryGetValue(GetPlayerSteamId64(player), out var user)) return false;
 
         if (user is null or { group: null }) return false;
 
@@ -150,7 +157,7 @@ public class VipCoreApi : IVipCoreApi
 
     public string GetClientVipGroup(CCSPlayerController player)
     {
-        if (!_vipCore.Users.TryGetValue(player.SteamID, out var user))
+        if (!_vipCore.Users.TryGetValue(GetPlayerSteamId64(player), out var user))
             throw new InvalidOperationException("player not found");
 
         return user.group;
@@ -167,15 +174,14 @@ public class VipCoreApi : IVipCoreApi
 
     public void UpdateClientVip(CCSPlayerController player, string name = "", string group = "", int time = -1)
     {
-        var steamId =
-            new SteamID(player.AuthorizedSteamID == null ? player.SteamID : player.AuthorizedSteamID.SteamId64);
+        var steamId64 = GetPlayerSteamId64(player);
 
-        Task.Run(() => _vipCore.Database.UpdateUserVip(steamId.AccountId, name, group, time));
+        Task.Run(() => _vipCore.Database.UpdateUserVip((long)steamId64, name, group, time));
 
-        var user = _vipCore.CreateNewUser(steamId.AccountId, name, group, time);
-        if (!_vipCore.Users.TryAdd(steamId.SteamId64, user))
+        var user = _vipCore.CreateNewUser((long)steamId64, name, group, time);
+        if (!_vipCore.Users.TryAdd(steamId64, user))
         {
-            _vipCore.Users[steamId.SteamId64] = user;
+            _vipCore.Users[steamId64] = user;
         }
 
         OnPlayerLoaded(player, group);
@@ -192,14 +198,13 @@ public class VipCoreApi : IVipCoreApi
             return;
         }
 
-        var accountId = authSteamId.AccountId;
         var steamId64 = authSteamId.SteamId64;
 
         OnPlayerLoaded(player, group);
-        Task.Run(() => SetClientVipAsync(name, accountId, group, time, steamId64));
+        Task.Run(() => SetClientVipAsync(name, (long)steamId64, group, time, steamId64));
     }
 
-    private async Task SetClientVipAsync(string name, int accountId, string group, int time,
+    private async Task SetClientVipAsync(string name, long accountId, string group, int time,
         ulong steamId64)
     {
         try
@@ -242,12 +247,11 @@ public class VipCoreApi : IVipCoreApi
             return;
         }
 
-        var accountId = authSteamId.AccountId;
         var steamId64 = authSteamId.SteamId64;
 
         OnPlayerLoaded(player, group);
 
-        var user = _vipCore.CreateNewUser(accountId, name, group, time);
+        var user = _vipCore.CreateNewUser((long)steamId64, name, group, time);
         _vipCore.Users.TryAdd(steamId64, user);
         _vipCore.SetClientFeature(steamId64, group);
         _vipCore.IsClientVip[player.Slot] = true;
@@ -260,22 +264,22 @@ public class VipCoreApi : IVipCoreApi
 
     public void RemoveClientVip(CCSPlayerController player)
     {
-        var steamId = new SteamID(player.SteamID);
+        var steamId64 = GetPlayerSteamId64(player);
 
-        if (!_vipCore.Users.TryGetValue(steamId.SteamId64, out var user))
+        if (!_vipCore.Users.TryGetValue(steamId64, out var user))
             throw new InvalidOperationException("player not found");
 
         OnPlayerRemoved(player, user.group);
         _vipCore.IsClientVip[player.Slot] = false;
-        Task.Run(() => RemoveClientVipAsync(steamId));
+        Task.Run(() => RemoveClientVipAsync(steamId64));
     }
 
-    private async Task RemoveClientVipAsync(SteamID steamId)
+    private async Task RemoveClientVipAsync(ulong steamId64)
     {
         try
         {
-            _vipCore.Users.Remove(steamId.SteamId64, out _);
-            await _vipCore.Database.RemoveUserFromDb(steamId.AccountId);
+            _vipCore.Users.Remove(steamId64, out _);
+            await _vipCore.Database.RemoveUserFromDb((long)steamId64);
         }
         catch (Exception e)
         {
@@ -332,7 +336,7 @@ public class VipCoreApi : IVipCoreApi
 
     public T GetFeatureValue<T>(CCSPlayerController player, string feature)
     {
-        if (!_vipCore.Users.TryGetValue(player.SteamID, out var user))
+        if (!_vipCore.Users.TryGetValue(GetPlayerSteamId64(player), out var user))
             throw new InvalidOperationException("User not found.");
 
         if (_vipCore.Config.Groups.TryGetValue(user.group, out var vipGroup))
@@ -397,72 +401,82 @@ public class VipCoreApi : IVipCoreApi
             cookie = new PlayerCookie
             {
                 SteamId64 = steamId64,
-                Features = new Dictionary<string, object>()
+                Features = new ConcurrentDictionary<string, object>()
             };
 
             _playersCookie[steamId64] = cookie;
         }
 
         cookie.Features[key] = value!;
+        Task.Run(() => _vipCore.Database.UpsertFeatureValueAsync(steamId64, key, value));
     }
 
     public T GetPlayerCookie<T>(ulong steamId64, string key)
     {
-        if (_playersCookie.TryGetValue(steamId64, out var cookie) &&
-            cookie.Features.TryGetValue(key, out var featureValue))
-        {
-            try
-            {
-                switch (featureValue)
-                {
-                    case T typedValue:
-                        return typedValue;
-                    case JsonElement jsonElement:
-                        return jsonElement.Deserialize<T>(_jsonSerializerOptions)!;
-                }
+        if (!_playersCookie.TryGetValue(steamId64, out var cookie) ||
+            !cookie.Features.TryGetValue(key, out var featureValue))
+            return default!;
 
-                var jsonString = featureValue.ToString();
-                if (jsonString != null)
-                {
-                    return JsonSerializer.Deserialize<T>(jsonString, _jsonSerializerOptions)!;
-                }
-            }
-            catch (Exception e)
+        try
+        {
+            switch (featureValue)
             {
-                _vipCore.PrintLogError($"Failed to deserialize cookie value: {key}, {e}");
+                case T typedValue:
+                    return typedValue;
+                case JsonElement jsonElement:
+                    return jsonElement.Deserialize<T>(_jsonSerializerOptions)!;
             }
+
+            if (typeof(T) == typeof(string))
+            {
+                return (T)(object)(featureValue.ToString() ?? string.Empty);
+            }
+
+            var converted = Convert.ChangeType(featureValue, typeof(T), CultureInfo.InvariantCulture);
+            if (converted is T result)
+                return result;
+
+            var valueAsText = featureValue.ToString();
+            if (!string.IsNullOrWhiteSpace(valueAsText))
+            {
+                return JsonSerializer.Deserialize<T>(valueAsText, _jsonSerializerOptions)!;
+            }
+        }
+        catch (Exception e)
+        {
+            _vipCore.PrintLogError("Failed to deserialize cookie value: {key}, {e}", key, e);
         }
 
         return default!;
     }
 
-
     public void LoadCookies()
     {
-        var filePath = Path.Combine(CoreConfigDirectory, "vip_core_cookie.json");
-
-        if (!File.Exists(filePath))
+        try
         {
-            File.WriteAllText(filePath, "[]");
-            return;
+            var cookiesFromDb = _vipCore.Database.LoadFeatureCookiesAsync().GetAwaiter().GetResult();
+            _playersCookie = new ConcurrentDictionary<ulong, PlayerCookie>(cookiesFromDb);
         }
-
-        var fileContent = File.ReadAllText(filePath);
-        var cookies = JsonSerializer.Deserialize<List<PlayerCookie>>(fileContent, _jsonSerializerOptions);
-
-        if (cookies != null)
+        catch (Exception e)
         {
-            _playersCookie = cookies.ToDictionary(c => c.SteamId64, c => c);
+            _vipCore.PrintLogError("Failed to load feature cookies from database: {e}", e);
         }
     }
 
     public void SaveCookies()
     {
-        var filePath = Path.Combine(CoreConfigDirectory, "vip_core_cookie.json");
+        try
+        {
+            _vipCore.Database.SaveFeatureCookiesAsync(_playersCookie.Values).GetAwaiter().GetResult();
+        }
+        catch (Exception e)
+        {
+            _vipCore.PrintLogError("Failed to save feature cookies to database: {e}", e);
+        }
+    }
 
-        var cookiesList = _playersCookie.Values.ToList();
-        var jsonContent = JsonSerializer.Serialize(cookiesList, _jsonSerializerOptions);
-
-        File.WriteAllText(filePath, jsonContent);
+    private static ulong GetPlayerSteamId64(CCSPlayerController player)
+    {
+        return player.AuthorizedSteamID?.SteamId64 ?? player.SteamID;
     }
 }

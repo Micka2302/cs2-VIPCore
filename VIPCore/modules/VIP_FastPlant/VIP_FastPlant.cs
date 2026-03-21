@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using VipCoreApi;
@@ -10,7 +10,7 @@ public class VipFastPlant : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Fast Defuse";
-    public override string ModuleVersion => "v1.0.0";
+    public override string ModuleVersion => "v1.3.4";
 
     private IVipCoreApi? _api;
     private FastPlant _fastPlant;

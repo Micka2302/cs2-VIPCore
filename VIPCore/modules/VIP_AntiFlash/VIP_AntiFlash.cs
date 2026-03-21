@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using VipCoreApi;
 using static VipCoreApi.IVipCoreApi;
@@ -9,7 +9,7 @@ public class VipAntiFlash : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Anti Flash";
-    public override string ModuleVersion => "v1.0.2";
+    public override string ModuleVersion => "v1.3.4";
     
     private IVipCoreApi? _api;
     private AntiFlash _antiFlash;

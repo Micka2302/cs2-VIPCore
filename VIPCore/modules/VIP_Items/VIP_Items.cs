@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using VipCoreApi;
 
@@ -8,7 +8,7 @@ public class VipItems : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Items";
-    public override string ModuleVersion => "1.0.1";
+    public override string ModuleVersion => "v1.3.4";
 
     private Items _items = null!;
     private IVipCoreApi? _api;

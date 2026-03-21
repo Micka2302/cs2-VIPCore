@@ -11,7 +11,7 @@ public class VIP_Random : BasePlugin
     public override string ModuleName => "[VIP] Random";
     public override string ModuleAuthor => "T3Marius";
     public override string ModuleDescription => "After x rounds from the map start, select random VIP.";
-    public override string ModuleVersion => "1.0.0";
+    public override string ModuleVersion => "v1.3.4";
 
     private static readonly string Feature = "random_vip";
     private IVipCoreApi? _vipApi;

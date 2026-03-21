@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using VipCoreApi;
@@ -11,7 +11,7 @@ public class VipMoney : BasePlugin
 {
     public override string ModuleAuthor => "WodiX";
     public override string ModuleName => "[VIP] Money";
-    public override string ModuleVersion => "v1.0.2";
+    public override string ModuleVersion => "v1.3.4";
 
     private IVipCoreApi? _api;
     private Money _money;

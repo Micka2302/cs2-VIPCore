@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Memory;
@@ -12,7 +12,7 @@ public class VipRespawn : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Respawn";
-    public override string ModuleVersion => "1.0.2";
+    public override string ModuleVersion => "v1.3.4";
 
     private Respawn _respawn;
     private IVipCoreApi? _api;

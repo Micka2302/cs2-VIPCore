@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 using RanksApi;
 using VipCoreApi;
@@ -10,7 +10,7 @@ public class VipExperienceMultiplier : BasePlugin
 {
     public override string ModuleAuthor => "thesamefabius";
     public override string ModuleName => "[VIP] Experience Multiplier";
-    public override string ModuleVersion => "v1.0.0";
+    public override string ModuleVersion => "v1.3.4";
 
     private IVipCoreApi? _vipApi;
     private IRanksApi? _ranksApi;

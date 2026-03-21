@@ -1,6 +1,6 @@
 {
-	"menu.Title": "[{blue}VIP Menu - {0}{default}]",
-	"vip.Prefix": "[{blue} VIP{default} ]",
+	"menu.Title": "{magenta}[Absynthium - VIP Menu - {0}]{default}",
+	"vip.Prefix": "{magenta}[Absynthium - VIP]{default}",
 	"vip.WelcomeToTheServer": "Hello, {blue}{0}{default}! You are a VIP player.",
 	"vip.Expires": "Your {blue}{0}{default} status expires {blue}{1}.",
 	"vip.Expired": "Your {blue}{0}{default} status has expired.",
