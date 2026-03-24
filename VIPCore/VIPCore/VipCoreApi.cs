@@ -149,7 +149,7 @@ public class VipCoreApi : IVipCoreApi
 
         if (user is null or { group: null }) return false;
 
-        if (!_vipCore.Config.Groups.TryGetValue(user.group, out var vipGroup)) return false;
+        if (!_vipCore.TryResolveVipGroup(user.group, out _, out var vipGroup)) return false;
 
         return vipGroup.Values.Any(vipGroupValue =>
             vipGroupValue.Key == feature && !string.IsNullOrEmpty(vipGroupValue.Value.ToString()));
@@ -339,7 +339,7 @@ public class VipCoreApi : IVipCoreApi
         if (!_vipCore.Users.TryGetValue(GetPlayerSteamId64(player), out var user))
             throw new InvalidOperationException("User not found.");
 
-        if (_vipCore.Config.Groups.TryGetValue(user.group, out var vipGroup))
+        if (_vipCore.TryResolveVipGroup(user.group, out _, out var vipGroup))
         {
             if (vipGroup.Values.TryGetValue(feature, out var value))
             {

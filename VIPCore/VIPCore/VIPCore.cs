@@ -191,17 +191,59 @@ public class VipCore : BasePlugin
             // Refresh in-memory state and permissions at each connection.
             if (Users.TryRemove(steamId64, out var cachedUser))
             {
-                VipApi.OnPlayerRemoved(player, cachedUser.group);
+                await Server.NextFrameAsync(() =>
+                {
+                    if (!player.IsValid || player.Connected != PlayerConnectedState.PlayerConnected)
+                        return;
+
+                    VipApi.OnPlayerRemoved(player, cachedUser.group);
+                });
             }
 
             IsClientVip[player.Slot] = false;
 
             var user = await Database.GetExistingUserFromDb(accountId);
             if (user == null)
+            {
+                Logger.LogInformation(
+                    "[VIP CHECK] AccountId {AccountId} -> no VIP found for this server.",
+                    accountId);
                 return;
+            }
+
+            if (!TryResolveVipGroup(user.group, out var resolvedVipGroup, out _))
+            {
+                Logger.LogWarning(
+                    "[VIP CHECK] AccountId {AccountId} -> VIP group '{VipGroup}' not found in vip.json.",
+                    accountId,
+                    user.group);
+            }
+            else if (!string.Equals(user.group, resolvedVipGroup, StringComparison.Ordinal))
+            {
+                Logger.LogInformation(
+                    "[VIP CHECK] AccountId {AccountId} -> resolved VIP group '{InputGroup}' to '{ResolvedGroup}'.",
+                    accountId,
+                    user.group,
+                    resolvedVipGroup);
+                user.group = resolvedVipGroup;
+            }
 
             var now = DateTime.UtcNow.GetUnixEpoch();
-            if (user.expires != 0 && now >= user.expires)
+            var expirationDebugText = user.expires == 0
+                ? "never"
+                : DateTimeOffset.FromUnixTimeSeconds(user.expires).ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
+            var isVipActive = user.expires == 0 || now < user.expires;
+
+            Logger.LogInformation(
+                "[VIP CHECK] User {UserName} [{AccountId}] -> group: {VipGroup}, active: {IsActive}, expires: {ExpiresUnix} ({ExpiresText})",
+                user.name,
+                accountId,
+                user.group,
+                isVipActive,
+                user.expires,
+                expirationDebugText);
+
+            if (!isVipActive)
             {
                 await Database.RemoveUserFromDb(accountId);
                 await Server.NextFrameAsync(() => VipApi.OnPlayerRemoved(player, user.group));
@@ -217,19 +259,30 @@ public class VipCore : BasePlugin
 
             await Server.NextFrameAsync(() =>
             {
-                if (!player.IsValid || player.Connected != PlayerConnectedState.PlayerConnected)
+                if (TryFinalizeVipLoad(player, user, expirationText))
                     return;
 
-                VipApi.OnPlayerLoaded(player, user.group);
-                IsClientVip[player.Slot] = true;
-
-                AddTimer(5.0f, () =>
+                var attempts = 0;
+                const int maxAttempts = 30; // ~3 seconds
+                CounterStrikeSharp.API.Modules.Timers.Timer retryTimer = null!;
+                retryTimer = AddTimer(0.1f, () =>
                 {
-                    if (!player.IsValid || player.Connected != PlayerConnectedState.PlayerConnected)
-                        return;
+                    attempts++;
 
-                    PrintToChat(player, Localizer["vip.WelcomeToTheServer", user.name] + expirationText);
-                });
+                    if (TryFinalizeVipLoad(player, user, expirationText))
+                    {
+                        retryTimer.Kill();
+                        return;
+                    }
+
+                    if (!player.IsValid || attempts >= maxAttempts)
+                    {
+                        Logger.LogWarning(
+                            "[VIP CHECK] AccountId {AccountId} -> player not ready after authorization, skipped VIP load.",
+                            accountId);
+                        retryTimer.Kill();
+                    }
+                }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
             });
         }
         catch (Exception e)
@@ -240,8 +293,22 @@ public class VipCore : BasePlugin
 
     public void SetClientFeature(ulong steamId, string vipGroup)
     {
-        if (!Config.Groups.TryGetValue(vipGroup, out var group) ||
-            !Users.TryGetValue(steamId, out var user)) return;
+        if (!Users.TryGetValue(steamId, out var user))
+            return;
+
+        if (!TryResolveVipGroup(vipGroup, out var resolvedGroup, out var group))
+        {
+            foreach (var (key, _) in Features)
+                user.FeatureState[key] = FeatureState.NoAccess;
+
+            Logger.LogWarning(
+                "[VIP CHECK] AccountId {AccountId} -> unable to apply features, group '{VipGroup}' not found.",
+                user.account_id,
+                vipGroup);
+            return;
+        }
+
+        user.group = resolvedGroup;
 
         foreach (var (key, _) in Features)
         {
@@ -287,7 +354,7 @@ public class VipCore : BasePlugin
         var vipGroup = command.GetArg(2);
         var endVipTime = Convert.ToInt32(command.GetArg(3));
 
-        if (!Config.Groups.ContainsKey(vipGroup))
+        if (!TryResolveVipGroup(vipGroup, out vipGroup, out _))
         {
             PrintLogError("This {VIP} group was not found!", "VIP");
             return;
@@ -367,7 +434,7 @@ public class VipCore : BasePlugin
 
         if (vipGroup is not ("-" or "-s"))
         {
-            if (!Config.Groups.ContainsKey(vipGroup))
+            if (!TryResolveVipGroup(vipGroup, out vipGroup, out _))
             {
                 PrintLogError("This {VIP} group was not found!", "VIP");
                 return;
@@ -421,15 +488,42 @@ public class VipCore : BasePlugin
 
         if (!IsClientVip[player.Slot])
         {
+            IsClientVip[player.Slot] = IsUserActiveVip(player);
+        }
+
+        if (!IsClientVip[player.Slot])
+        {
             PrintToChat(player, Localizer["vip.NoAccess"]);
             return;
         }
 
         var steamId64 = GetPlayerSteamId64(player);
-        if (!Users.TryGetValue(steamId64, out var user)) return;
+        if (!Users.TryGetValue(steamId64, out var user))
+        {
+            var authorizedSteamId = player.AuthorizedSteamID;
+            if (authorizedSteamId != null)
+            {
+                Task.Run(() => OnClientAuthorizedAsync(player, authorizedSteamId));
+            }
+
+            PrintToChat(player, Localizer["vip.NoAccess"]);
+            return;
+        }
+
+        if (!TryResolveVipGroup(user.group, out var resolvedGroup, out var vipGroup))
+        {
+            Logger.LogWarning(
+                "[VIP MENU] AccountId {AccountId} -> VIP group '{VipGroup}' not found in vip.json.",
+                user.account_id,
+                user.group);
+            PrintToChat(player, Localizer["vip.NoAccess"]);
+            return;
+        }
+
+        user.group = resolvedGroup;
 
         var menu = VipApi.CreateMenu(Localizer["menu.Title", user.group]);
-        if (Config.Groups.TryGetValue(user.group, out var vipGroup))
+        if (Config.Groups.TryGetValue(user.group, out vipGroup))
         {
             var sortedFeatures = Features.Where(setting => setting.Value.FeatureType is not FeatureType.Hide)
                 .OrderBy(setting => Array.IndexOf(_sortedItems, setting.Key))
@@ -591,6 +685,66 @@ public class VipCore : BasePlugin
         if (!CoreConfig.VipLogging) return;
 
         Logger.LogWarning($"{message}", args);
+    }
+
+    public bool TryResolveVipGroup(string? vipGroupName, out string resolvedGroupName, out VipGroup vipGroup)
+    {
+        resolvedGroupName = string.Empty;
+        vipGroup = null!;
+
+        if (string.IsNullOrWhiteSpace(vipGroupName))
+            return false;
+
+        var normalized = vipGroupName.Trim();
+        var candidates = new List<string> { normalized };
+
+        if (normalized.StartsWith('#'))
+            candidates.Add(normalized[1..]);
+        else
+            candidates.Add($"#{normalized}");
+
+        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (Config.Groups.TryGetValue(candidate, out vipGroup))
+            {
+                resolvedGroupName = candidate;
+                return true;
+            }
+
+            var caseInsensitiveMatchKey = Config.Groups.Keys.FirstOrDefault(entryKey =>
+                string.Equals(entryKey, candidate, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(caseInsensitiveMatchKey) &&
+                Config.Groups.TryGetValue(caseInsensitiveMatchKey, out vipGroup))
+            {
+                resolvedGroupName = caseInsensitiveMatchKey;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryFinalizeVipLoad(CCSPlayerController player, User user, string expirationText)
+    {
+        if (!player.IsValid || player.Connected != PlayerConnectedState.PlayerConnected)
+            return false;
+
+        VipApi.OnPlayerLoaded(player, user.group);
+        IsClientVip[player.Slot] = true;
+        Logger.LogInformation(
+            "[VIP CHECK] AccountId {AccountId} -> PlayerLoaded dispatched for group '{VipGroup}'.",
+            user.account_id,
+            user.group);
+
+        AddTimer(5.0f, () =>
+        {
+            if (!player.IsValid || player.Connected != PlayerConnectedState.PlayerConnected)
+                return;
+
+            PrintToChat(player, Localizer["vip.WelcomeToTheServer", user.name] + expirationText);
+        }, TimerFlags.STOP_ON_MAPCHANGE);
+
+        return true;
     }
 
     private string GetTimeUnitName => CoreConfig.TimeMode switch
