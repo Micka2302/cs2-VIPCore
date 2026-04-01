@@ -72,6 +72,8 @@ public class Database(VipCore vipCore, ILogger logger, string dbConnectionString
                 ServerIP = vipCore.CoreConfig.ServerIp,
                 ServerPort = vipCore.CoreConfig.ServerPort,
             });
+
+            await CleanupExpiredVipUsersOnStartupAsync(dbConnection);
         }
         catch (Exception e)
         {
@@ -79,17 +81,23 @@ public class Database(VipCore vipCore, ILogger logger, string dbConnectionString
         }
     }
 
-    public async Task<User?> GetExistingUserFromDb(long accountId)
+    public async Task<User?> GetExistingUserFromDb(long accountId, string? playerName = null)
     {
         try
         {
             await using var connection = new MySqlConnection(dbConnectionString);
             await connection.OpenAsync();
             var serverId = await GetServerId(connection);
+            var normalizedPlayerName = NormalizePlayerName(playerName);
+
+            await TryNormalizeLegacySteamIdAsync(connection, accountId, serverId, normalizedPlayerName);
 
             var existingUser = await connection.QuerySingleOrDefaultAsync<User>(
                 @"SELECT * FROM vip_users WHERE account_id = @AccId AND sid = @sid",
                 new { AccId = accountId, sid = serverId });
+
+            if (existingUser != null)
+                await SyncPlayerNameAsync(connection, accountId, serverId, existingUser, normalizedPlayerName);
 
             return existingUser ?? null;
         }
@@ -313,6 +321,34 @@ public class Database(VipCore vipCore, ILogger logger, string dbConnectionString
         }
     }
 
+    private async Task CleanupExpiredVipUsersOnStartupAsync(MySqlConnection connection)
+    {
+        var currentUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var currentUnixMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var deletedCount = await connection.ExecuteAsync(
+            """
+            DELETE FROM `vip_users`
+            WHERE (
+              (
+                `expires` > 0 AND (
+                  (`expires` <= @CurrentUnixSeconds)
+                  OR (`expires` > 9999999999 AND `expires` <= @CurrentUnixMilliseconds)
+                )
+              )
+              OR (`expiration` IS NOT NULL AND `expiration` <= UTC_TIMESTAMP())
+            );
+            """,
+            new
+            {
+                CurrentUnixSeconds = currentUnixSeconds,
+                CurrentUnixMilliseconds = currentUnixMilliseconds
+            });
+
+        vipCore.PrintLogInfo(
+            "Startup cleanup finished: removed {count} expired VIP account(s) from `vip_users`.",
+            deletedCount);
+    }
+
     private async Task<long> GetServerId(IDbConnection connection)
     {
         try
@@ -411,6 +447,150 @@ public class Database(VipCore vipCore, ILogger logger, string dbConnectionString
                                            """;
 
         await connection.ExecuteAsync(syncExpirationQuery);
+    }
+
+    private async Task TryNormalizeLegacySteamIdAsync(MySqlConnection connection, long steamId64, long serverId,
+        string? playerName)
+    {
+        var legacyAccountId = steamId64 - SteamId64IdentifierOffset;
+        if (legacyAccountId <= 0)
+            return;
+
+        var legacyAccountIdText = legacyAccountId.ToString(CultureInfo.InvariantCulture);
+        var legacySteamId3 = $"[U:1:{legacyAccountIdText}]";
+
+        var queryParameters = new
+        {
+            sid = serverId,
+            SteamId64 = steamId64,
+            LegacyAccountId = legacyAccountId,
+            LegacyAccountIdText = legacyAccountIdText,
+            LegacySteamId3 = legacySteamId3
+        };
+
+        const string hasSteamId64EntryQuery = """
+                                              SELECT COUNT(*)
+                                              FROM `vip_users`
+                                              WHERE `account_id` = @SteamId64 AND `sid` = @sid;
+                                              """;
+
+        const string selectLegacyCandidateQuery = """
+                                                 SELECT CAST(`account_id` AS CHAR)
+                                                 FROM `vip_users`
+                                                 WHERE `sid` = @sid
+                                                   AND (
+                                                     `account_id` = @LegacyAccountId
+                                                     OR CAST(`account_id` AS CHAR) = @LegacyAccountIdText
+                                                     OR CAST(`account_id` AS CHAR) = @LegacySteamId3
+                                                   )
+                                                 ORDER BY CASE WHEN `expires` = 0 THEN 1 ELSE 0 END DESC, `expires` DESC
+                                                 LIMIT 1;
+                                                 """;
+
+        const string updateLegacyCandidateQuery = """
+                                                  UPDATE `vip_users`
+                                                  SET `account_id` = @SteamId64,
+                                                      `name` = COALESCE(@PlayerName, `name`)
+                                                  WHERE `sid` = @sid
+                                                    AND CAST(`account_id` AS CHAR) = @LegacyAccountIdRaw;
+                                                  """;
+
+        const string deleteLegacyRowsQuery = """
+                                            DELETE FROM `vip_users`
+                                            WHERE `sid` = @sid
+                                              AND (
+                                                `account_id` = @LegacyAccountId
+                                                OR CAST(`account_id` AS CHAR) = @LegacyAccountIdText
+                                                OR CAST(`account_id` AS CHAR) = @LegacySteamId3
+                                              );
+                                            """;
+
+        const string updateSteamId64NameQuery = """
+                                                UPDATE `vip_users`
+                                                SET `name` = COALESCE(@PlayerName, `name`)
+                                                WHERE `account_id` = @SteamId64 AND `sid` = @sid;
+                                                """;
+
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        var hasSteamId64Entry =
+            await connection.ExecuteScalarAsync<int>(hasSteamId64EntryQuery, queryParameters, transaction) > 0;
+        var legacyAccountIdRaw =
+            await connection.QuerySingleOrDefaultAsync<string?>(selectLegacyCandidateQuery, queryParameters, transaction);
+
+        if (string.IsNullOrWhiteSpace(legacyAccountIdRaw))
+        {
+            await transaction.CommitAsync();
+            return;
+        }
+
+        var normalizedLegacyAccountIdRaw = legacyAccountIdRaw.Trim();
+        var migrationChanged = false;
+
+        if (hasSteamId64Entry)
+        {
+            await connection.ExecuteAsync(updateSteamId64NameQuery, new
+            {
+                queryParameters.sid,
+                queryParameters.SteamId64,
+                PlayerName = playerName
+            }, transaction);
+
+            var deletedRows = await connection.ExecuteAsync(deleteLegacyRowsQuery, queryParameters, transaction);
+            migrationChanged = deletedRows > 0;
+        }
+        else
+        {
+            var migratedRows = await connection.ExecuteAsync(updateLegacyCandidateQuery, new
+            {
+                queryParameters.sid,
+                queryParameters.SteamId64,
+                LegacyAccountIdRaw = normalizedLegacyAccountIdRaw,
+                PlayerName = playerName
+            }, transaction);
+
+            if (migratedRows > 0)
+            {
+                await connection.ExecuteAsync(deleteLegacyRowsQuery, queryParameters, transaction);
+                migrationChanged = true;
+            }
+        }
+
+        await transaction.CommitAsync();
+
+        if (migrationChanged)
+        {
+            vipCore.PrintLogInfo(
+                "Normalized legacy SteamID entry '{legacyId}' to SteamID64 '{steamId64}' for server '{sid}'.",
+                normalizedLegacyAccountIdRaw,
+                steamId64,
+                serverId);
+        }
+    }
+
+    private static string? NormalizePlayerName(string? playerName)
+    {
+        if (string.IsNullOrWhiteSpace(playerName))
+            return null;
+
+        var normalizedPlayerName = playerName.Trim();
+        return normalizedPlayerName.Length <= 64 ? normalizedPlayerName : normalizedPlayerName[..64];
+    }
+
+    private static async Task SyncPlayerNameAsync(MySqlConnection connection, long accountId, long serverId, User user,
+        string? playerName)
+    {
+        if (string.IsNullOrWhiteSpace(playerName) ||
+            string.Equals(user.name, playerName, StringComparison.Ordinal))
+            return;
+
+        await connection.ExecuteAsync("""
+                                      UPDATE `vip_users`
+                                      SET `name` = @PlayerName
+                                      WHERE `account_id` = @AccId AND `sid` = @sid;
+                                      """, new { PlayerName = playerName, AccId = accountId, sid = serverId });
+
+        user.name = playerName;
     }
 
 

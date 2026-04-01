@@ -83,8 +83,10 @@ public class VipCore : BasePlugin
         {
             var player = Utilities.GetPlayerFromSlot(slot);
             if (player is null || !player.IsValid) return;
+            var playerNameSnapshot = player.PlayerName;
+            var playerSlot = player.Slot;
 
-            Task.Run(() => OnClientAuthorizedAsync(player, id));
+            Task.Run(() => OnClientAuthorizedAsync(player, id, playerNameSnapshot, playerSlot));
         });
 
         RegisterListener<Listeners.OnMapStart>(_ => VipApi.LoadCookies());
@@ -181,7 +183,8 @@ public class VipCore : BasePlugin
         }, TimerFlags.REPEAT);
     }
 
-    public async Task OnClientAuthorizedAsync(CCSPlayerController player, SteamID steamId)
+    public async Task OnClientAuthorizedAsync(CCSPlayerController player, SteamID steamId,
+        string? playerNameSnapshot = null, int? playerSlotSnapshot = null)
     {
         try
         {
@@ -200,9 +203,10 @@ public class VipCore : BasePlugin
                 });
             }
 
-            IsClientVip[player.Slot] = false;
+            var playerSlot = playerSlotSnapshot ?? player.Slot;
+            IsClientVip[playerSlot] = false;
 
-            var user = await Database.GetExistingUserFromDb(accountId);
+            var user = await Database.GetExistingUserFromDb(accountId, playerNameSnapshot);
             if (user == null)
             {
                 Logger.LogInformation(
@@ -468,7 +472,9 @@ public class VipCore : BasePlugin
 
         var steamid = target.AuthorizedSteamID;
 
-        Task.Run(async () => await OnClientAuthorizedAsync(target, steamid));
+        var playerNameSnapshot = target.PlayerName;
+        var playerSlot = target.Slot;
+        Task.Run(async () => await OnClientAuthorizedAsync(target, steamid, playerNameSnapshot, playerSlot));
     }
 
     [RequiresPermissions("@css/root")]
@@ -503,7 +509,9 @@ public class VipCore : BasePlugin
             var authorizedSteamId = player.AuthorizedSteamID;
             if (authorizedSteamId != null)
             {
-                Task.Run(() => OnClientAuthorizedAsync(player, authorizedSteamId));
+                var playerNameSnapshot = player.PlayerName;
+                var playerSlot = player.Slot;
+                Task.Run(() => OnClientAuthorizedAsync(player, authorizedSteamId, playerNameSnapshot, playerSlot));
             }
 
             PrintToChat(player, Localizer["vip.NoAccess"]);
